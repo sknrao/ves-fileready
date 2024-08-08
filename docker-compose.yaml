@@ -1,0 +1,147 @@
+services:
+  zookeeper-1:
+    image: quay.io/strimzi/kafka:0.35.0-kafka-3.4.0
+    command: [
+        "sh", "-c",
+        "bin/zookeeper-server-start.sh config/zookeeper.properties"
+      ]
+    ports:
+      - '2181:2181'
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      LOG_DIR: /tmp/logs
+    labels:
+      - "ranpm=yes"
+
+  kafka-1:
+    image: quay.io/strimzi/kafka:0.35.0-kafka-3.4.0
+    container_name: common-kafka-1-1
+    command: [
+      "sh", "-c",
+      "bin/kafka-server-start.sh /tmp/kafka/strimzi.properties"
+    ]
+    environment:
+      LOG_DIR: /tmp/logs
+    depends_on:
+      - zookeeper-1
+    ports:
+      - "9092:9092"
+      - "9097:9097"
+    labels:
+      - "ranpm=yes"
+    volumes:
+      - ./kafka/strimzi.properties:/tmp/kafka/strimzi.properties
+
+  redpanda:
+    container_name: redpanda-console
+    image: redpandadata/console:v2.2.3
+    restart: on-failure
+    hostname: redpanda-console
+    ports:
+    - "8780:8080"
+    depends_on:
+      - kafka-1
+    environment:
+      KAFKA_BROKERS: kafka-1:9092
+    labels:
+      - "ranpm=yes"
+
+  message-router:
+    container_name: message-router
+    image: nexus3.onap.org:10002/onap/dmaap/dmaap-mr:1.4.4
+    ports:
+      - 3904:3904
+      - 3905:3905
+    environment:
+      enableCadi: 'false'
+    volumes:
+      - ./dmaap/MsgRtrApi.properties:/appl/dmaapMR1/bundleconfig/etc/appprops/MsgRtrApi.properties
+      - ./dmaap/logback.xml:/appl/dmaapMR1/bundleconfig/etc/logback.xml
+    depends_on:
+      - zookeeper-1
+      - kafka-1
+    labels:
+      - "ranpm=yes"
+
+  ves-collector:
+    image: nexus3.onap.org:10002/onap/org.onap.dcaegen2.collectors.ves.vescollector:1.12.3
+    container_name: ves-collector
+    environment:
+      DMAAPHOST: message-router
+    ports:
+      - 18080:8080
+      - 8443:8443
+    volumes:
+      - ./ves-collector/collector.properties:/opt/app/VESCollector/etc/collector.properties
+      - ./ves-collector/ves-dmaap-config.json:/opt/app/VESCollector/etc/ves-dmaap-config.json
+    labels:
+      - "ranpm=yes"
+
+  minio:
+    image: minio/minio
+    container_name: minio-server
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: adminadmin
+    ports:
+    - 9000:9000
+    - 9001:9001
+    labels:
+      - "ranpm=yes"
+    volumes:
+    - /tmp/minio-test/0:/data
+
+  kafka-producer-pm-xml2json-0:
+    image: nexus3.o-ran-sc.org:10001/o-ran-sc/nonrtric-plt-ranpm-pm-file-converter:1.0.1
+    container_name: kafka-producer-pm-xml2json-0
+    volumes:
+    - ./pmfc/application_configuration_xml2json.json:/application_configuration.json
+    - ./shared-volume:/pm-files
+    ports:
+    - 9881:80
+    labels:
+      - "ranpm=yes"
+    environment:
+      KP: kafka-producer-pm-xml2json-0
+      FILES_VOLUME: /pm-files
+      KAFKA_SERVER: kafka-1:9092
+      ICS: ics:8083
+      SELF: kafka-producer-pm-xml2json-0:80
+      FILESTORE_USER: admin
+      FILESTORE_PWD: adminadmin
+      FILESTORE_SERVER: minio-server:9000
+
+  pm-producer-json2kafka:
+    image: nexus3.o-ran-sc.org:10001/o-ran-sc/nonrtric-plt-pmproducer:1.0.1
+    container_name: pm-producer-json2kafka
+    environment:
+      APP_PM-PRODUCER-BASE-URL: http://pm-producer-json2kafka:8084
+    volumes:
+    - ./pmpr/application_configuration.json:/opt/app/pm-producer-service/data/application_configuration.json
+    - ./pmpr/application.yaml:/opt/app/pm-producer-service/config/application.yaml
+    - ./shared-volume:/pm-files
+    ports:
+    - 8084:8084
+    labels:
+      - "ranpm=yes"
+
+  dfc1:
+    container_name: dfc1
+    user: root
+    image: nexus3.o-ran-sc.org:10001/o-ran-sc/nonrtric-plt-ranpm-datafilecollector:1.0.0
+    ports:
+    - 8433:8433
+    volumes:
+    - ./dfc1/application.yaml:/opt/app/datafile/config/application.yaml
+    - ./dfc1/truststore.jks:/opt/app/datafile/config/truststore.jks
+    - ./shared-volume:/tmp/onap_datafile/
+    labels:
+      - "ranpm=yes"
+
+networks:
+  default:
+    external: true
+    name: nonrtric-docker-net
+
