@@ -54,7 +54,7 @@ app:
    # KAFKA boostrap servers. This is only needed if there are Information Types that uses a kafkaInputTopic
   # several redundant boostrap servers can be specified, separated by a comma ','.
   kafka:
-    bootstrap-servers: kafka-1:9097
+    bootstrap-servers: kafka-1:9092
     # output topic
     collected-file-topic: collected-file
     client-id: datafile-1
